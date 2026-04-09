@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wake Alarm</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0f;
+      --surface: #12121a;
+      --border: #2a2a3a;
+      --accent: #00e5ff;
+      --accent2: #ff4081;
+      --text: #e0e0f0;
+      --muted: #666680;
+      --green: #00e676;
+      --red: #ff1744;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px 48px;
+    }
+
+    /* ── Wake lock status bar ── */
+    #lock-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      padding: 6px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      background: rgba(10,10,15,0.9);
+      backdrop-filter: blur(6px);
+      border-bottom: 1px solid var(--border);
+      z-index: 100;
+    }
+    #lock-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--red);
+      flex-shrink: 0;
+      transition: background 0.4s;
+    }
+    #lock-dot.active { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    #lock-text { color: var(--muted); flex: 1; }
+
+    /* ── Black screen toggle button (in lock bar) ── */
+    #btn-blackscreen {
+      margin-left: auto;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      padding: 4px 12px;
+      font-size: 11px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    #btn-blackscreen:hover { color: var(--text); border-color: var(--muted); }
+    #btn-blackscreen.on { color: #fff; border-color: rgba(255,255,255,0.4); }
+
+    /* ── Black screen overlay ── */
+    #blackscreen {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 8000;
+      background: #000;
+      cursor: pointer;
+      align-items: flex-end;
+      justify-content: center;
+      padding-bottom: 36px;
+    }
+    #blackscreen.show { display: flex; }
+    #blackscreen-hint {
+      color: rgba(255,255,255,0.18);
+      font-size: 12px;
+      letter-spacing: 0.5px;
+      animation: fade-hint 4s ease-out forwards;
+      pointer-events: none;
+    }
+    @keyframes fade-hint {
+      0%   { opacity: 1; }
+      65%  { opacity: 0.4; }
+      100% { opacity: 0; }
+    }
+
+    /* ── Clock ── */
+    #clock-wrap {
+      margin-top: 56px;
+      text-align: center;
+    }
+    #clock {
+      font-size: clamp(64px, 15vw, 140px);
+      font-weight: 700;
+      letter-spacing: -2px;
+      font-variant-numeric: tabular-nums;
+      color: var(--accent);
+      text-shadow: 0 0 40px rgba(0,229,255,0.4);
+      line-height: 1;
+    }
+    #date-display {
+      margin-top: 8px;
+      font-size: 18px;
+      color: var(--muted);
+      letter-spacing: 1px;
+    }
+
+    /* ── Section card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      width: 100%;
+      max-width: 560px;
+      margin-top: 32px;
+    }
+    .card h2 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    /* ── Add alarm form ── */
+    #add-form {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    #add-form input[type="time"] {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      padding: 10px 14px;
+      font-size: 16px;
+      flex: 1;
+      min-width: 130px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #add-form input[type="time"]:focus { border-color: var(--accent); }
+    #add-form input[type="time"]::-webkit-calendar-picker-indicator {
+      filter: invert(1) opacity(0.5);
+      cursor: pointer;
+    }
+
+    /* tone selector + preview bundled together */
+    #tone-row {
+      display: flex;
+      gap: 6px;
+      flex: 2;
+      min-width: 200px;
+    }
+    #tone-row select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      padding: 10px 14px;
+      font-size: 16px;
+      flex: 1;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #tone-row select:focus { border-color: var(--accent); }
+
+    #btn-preview {
+      background: transparent;
+      border: 1px solid var(--accent);
+      border-radius: 10px;
+      color: var(--accent);
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.2s, opacity 0.2s;
+    }
+    #btn-preview:hover:not(:disabled) { background: rgba(0,229,255,0.08); }
+    #btn-preview:disabled { opacity: 0.4; cursor: default; }
+    #btn-preview.playing {
+      border-color: var(--green);
+      color: var(--green);
+      animation: preview-pulse 0.5s ease-in-out infinite alternate;
+    }
+    @keyframes preview-pulse {
+      from { opacity: 0.7; }
+      to   { opacity: 1; }
+    }
+
+    #btn-add {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 22px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+      white-space: nowrap;
+    }
+    #btn-add:hover { opacity: 0.85; }
+    #btn-add:active { transform: scale(0.97); }
+
+    /* ── Alarm list ── */
+    #alarm-list { display: flex; flex-direction: column; gap: 10px; }
+    .alarm-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 16px;
+      gap: 12px;
+      transition: border-color 0.3s;
+    }
+    .alarm-item.firing {
+      border-color: var(--accent2);
+      box-shadow: 0 0 16px rgba(255,64,129,0.3);
+      animation: pulse-border 1s ease-in-out infinite;
+    }
+    @keyframes pulse-border {
+      0%, 100% { box-shadow: 0 0 16px rgba(255,64,129,0.3); }
+      50%       { box-shadow: 0 0 32px rgba(255,64,129,0.6); }
+    }
+    .alarm-time-label {
+      font-size: 28px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+      min-width: 90px;
+    }
+    .alarm-tone-label {
+      font-size: 12px;
+      color: var(--muted);
+      flex: 1;
+    }
+    .alarm-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn-sm {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-sm:hover { background: var(--border); }
+    .btn-snooze  { border-color: #ff9800; color: #ff9800; }
+    .btn-dismiss { border-color: var(--accent2); color: var(--accent2); }
+    .btn-delete  { border-color: var(--border); color: var(--muted); }
+    .btn-snooze:hover  { background: rgba(255,152,0,0.1); }
+    .btn-dismiss:hover { background: rgba(255,64,129,0.1); }
+
+    .empty-state {
+      text-align: center;
+      color: var(--muted);
+      font-size: 14px;
+      padding: 16px 0;
+    }
+
+    /* ── Full-screen alarm overlay ── */
+    #alarm-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(10,10,15,0.97);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      animation: flash-bg 0.6s ease-in-out infinite alternate;
+    }
+    #alarm-overlay.show { display: flex; }
+    @keyframes flash-bg {
+      from { background: rgba(10,10,15,0.97); }
+      to   { background: rgba(40,5,20,0.97); }
+    }
+    #overlay-label {
+      font-size: 20px;
+      color: var(--muted);
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+    #overlay-time {
+      font-size: clamp(80px, 20vw, 180px);
+      font-weight: 900;
+      color: var(--accent2);
+      text-shadow: 0 0 60px rgba(255,64,129,0.7);
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+      animation: throb 0.5s ease-in-out infinite alternate;
+    }
+    @keyframes throb {
+      from { transform: scale(1);    text-shadow: 0 0 40px rgba(255,64,129,0.5); }
+      to   { transform: scale(1.04); text-shadow: 0 0 80px rgba(255,64,129,0.9); }
+    }
+    #overlay-title {
+      font-size: clamp(36px, 8vw, 72px);
+      font-weight: 900;
+      color: #fff;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+    }
+    #overlay-buttons {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 12px;
+    }
+    .overlay-btn {
+      padding: 16px 36px;
+      font-size: 18px;
+      font-weight: 700;
+      border: none;
+      border-radius: 14px;
+      cursor: pointer;
+      transition: transform 0.1s, opacity 0.2s;
+    }
+    .overlay-btn:hover   { opacity: 0.85; }
+    .overlay-btn:active  { transform: scale(0.96); }
+    #btn-overlay-snooze  { background: #ff9800; color: #000; }
+    #btn-overlay-dismiss { background: var(--accent2); color: #fff; }
+
+    /* ── Footer note ── */
+    #footer {
+      margin-top: 40px;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+      max-width: 420px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Wake lock status bar -->
+  <div id="lock-bar">
+    <div id="lock-dot"></div>
+    <span id="lock-text">Screen Wake Lock inactive</span>
+    <button id="btn-blackscreen" onclick="toggleBlackScreen()">⬛ Black Screen</button>
+  </div>
+
+  <!-- Black screen overlay (z-index 8000, alarm at 9999 breaks through) -->
+  <div id="blackscreen" onclick="exitBlackScreen()">
+    <span id="blackscreen-hint">Click or press any key to exit black screen</span>
+  </div>
+
+  <!-- Clock -->
+  <div id="clock-wrap">
+    <div id="clock">--:--:--</div>
+    <div id="date-display">---</div>
+  </div>
+
+  <!-- Add alarm -->
+  <div class="card">
+    <h2>Set Alarm</h2>
+    <div id="add-form">
+      <input type="time" id="input-time" />
+      <div id="tone-row">
+        <select id="input-tone">
+          <option value="classic">Classic Beep</option>
+          <option value="siren">Siren</option>
+          <option value="crazy">Crazy Mode</option>
+          <option value="nuclear">Nuclear</option>
+          <option value="school">School Bell</option>
+        </select>
+        <button id="btn-preview" onclick="previewTone()">▶ Preview</button>
+      </div>
+      <button id="btn-add" onclick="addAlarm()">+ Add</button>
+    </div>
+  </div>
+
+  <!-- Alarm list -->
+  <div class="card">
+    <h2>Alarms</h2>
+    <div id="alarm-list"><p class="empty-state">No alarms set yet.</p></div>
+  </div>
+
+  <!-- Full-screen firing overlay -->
+  <div id="alarm-overlay">
+    <div id="overlay-label">alarm</div>
+    <div id="overlay-time">--:--</div>
+    <div id="overlay-title">WAKE UP!</div>
+    <div id="overlay-buttons">
+      <button class="overlay-btn" id="btn-overlay-snooze"  onclick="snoozeActive()">Snooze 5 min</button>
+      <button class="overlay-btn" id="btn-overlay-dismiss" onclick="dismissActive()">Dismiss</button>
+    </div>
+  </div>
+
+  <div id="footer">
+    Keep this tab open. The Screen Wake Lock prevents the display from sleeping.<br>
+    Use <strong>Black Screen</strong> to darken the room — alarm will still break through.
+  </div>
+
+<script>
+// ─────────────────────────────────────────────
+//  State
+// ─────────────────────────────────────────────
+let alarms        = [];    // { id, hh, mm, tone, firing, snoozedUntil }
+let activeAlarmId = null;
+let audioCtx      = null;
+let soundLoop     = null;
+let wakeLock      = null;
+let blackScreenOn = false;
+
+// ─────────────────────────────────────────────
+//  Clock
+// ─────────────────────────────────────────────
+const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MONTHS = ['January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+
+function updateClock() {
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2,'0');
+  const m = String(now.getMinutes()).padStart(2,'0');
+  const s = String(now.getSeconds()).padStart(2,'0');
+  document.getElementById('clock').textContent = `${h}:${m}:${s}`;
+  document.getElementById('date-display').textContent =
+    `${DAYS[now.getDay()]}, ${MONTHS[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`;
+  checkAlarms(now);
+}
+
+// ─────────────────────────────────────────────
+//  Wake Lock
+// ─────────────────────────────────────────────
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) {
+    document.getElementById('lock-text').textContent = 'Wake Lock not supported — try Chrome or Edge';
+    return;
+  }
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    setLockStatus(true);
+    wakeLock.addEventListener('release', () => setLockStatus(false));
+  } catch (err) {
+    setLockStatus(false);
+  }
+}
+
+function setLockStatus(active) {
+  document.getElementById('lock-dot').className = active ? 'active' : '';
+  document.getElementById('lock-text').textContent = active
+    ? 'Screen Wake Lock active — display will stay on'
+    : 'Screen Wake Lock inactive — click anywhere to re-activate';
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') requestWakeLock();
+});
+document.addEventListener('click', () => {
+  if (!wakeLock || wakeLock.released) requestWakeLock();
+});
+
+// ─────────────────────────────────────────────
+//  Black Screen
+// ─────────────────────────────────────────────
+function toggleBlackScreen() {
+  blackScreenOn ? exitBlackScreen() : enterBlackScreen();
+}
+
+function enterBlackScreen() {
+  blackScreenOn = true;
+  document.getElementById('btn-blackscreen').classList.add('on');
+  // Reset hint fade animation
+  const hint = document.getElementById('blackscreen-hint');
+  hint.style.animation = 'none';
+  void hint.offsetHeight; // force reflow
+  hint.style.animation = '';
+  document.getElementById('blackscreen').classList.add('show');
+}
+
+function exitBlackScreen() {
+  if (!blackScreenOn) return;
+  blackScreenOn = false;
+  document.getElementById('btn-blackscreen').classList.remove('on');
+  document.getElementById('blackscreen').classList.remove('show');
+}
+
+document.addEventListener('keydown', () => {
+  if (blackScreenOn) exitBlackScreen();
+});
+
+// ─────────────────────────────────────────────
+//  Alarm Management
+// ─────────────────────────────────────────────
+function addAlarm() {
+  const timeVal = document.getElementById('input-time').value;
+  const tone    = document.getElementById('input-tone').value;
+  if (!timeVal) { alert('Pick a time first!'); return; }
+  const [hh, mm] = timeVal.split(':').map(Number);
+  alarms.push({ id: Date.now(), hh, mm, tone, firing: false, snoozedUntil: null });
+  renderAlarms();
+}
+
+function deleteAlarm(id) {
+  if (activeAlarmId === id) dismissActive();
+  alarms = alarms.filter(a => a.id !== id);
+  renderAlarms();
+}
+
+const TONE_LABELS = {
+  classic: 'Classic Beep', siren: 'Siren', crazy: 'Crazy Mode',
+  nuclear: 'Nuclear', school: 'School Bell'
+};
+
+function renderAlarms() {
+  const list = document.getElementById('alarm-list');
+  if (alarms.length === 0) {
+    list.innerHTML = '<p class="empty-state">No alarms set yet.</p>';
+    return;
+  }
+  list.innerHTML = alarms.map(a => {
+    const label = `${String(a.hh).padStart(2,'0')}:${String(a.mm).padStart(2,'0')}`;
+    const firingBtns = a.firing
+      ? `<button class="btn-sm btn-snooze"  onclick="snoozeActive()">Snooze</button>
+         <button class="btn-sm btn-dismiss" onclick="dismissActive()">Dismiss</button>`
+      : '';
+    return `
+      <div class="alarm-item${a.firing ? ' firing' : ''}" id="alarm-${a.id}">
+        <span class="alarm-time-label">${label}</span>
+        <span class="alarm-tone-label">${TONE_LABELS[a.tone] || a.tone}</span>
+        <div class="alarm-actions">
+          ${firingBtns}
+          <button class="btn-sm btn-delete" onclick="deleteAlarm(${a.id})">✕</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ─────────────────────────────────────────────
+//  Alarm Triggering
+// ─────────────────────────────────────────────
+function checkAlarms(now) {
+  if (activeAlarmId !== null) return;
+  const h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
+  for (const a of alarms) {
+    if (a.firing) continue;
+    if (a.snoozedUntil && now < a.snoozedUntil) continue;
+    if (a.hh === h && a.mm === m && s === 0) { fireAlarm(a); break; }
+  }
+}
+
+function fireAlarm(alarm) {
+  alarm.firing  = true;
+  activeAlarmId = alarm.id;
+  exitBlackScreen(); // always clear black screen so alarm is visible
+  renderAlarms();
+  const label = `${String(alarm.hh).padStart(2,'0')}:${String(alarm.mm).padStart(2,'0')}`;
+  document.getElementById('overlay-time').textContent = label;
+  document.getElementById('alarm-overlay').className = 'show';
+  startSoundLoop(alarm.tone);
+}
+
+function snoozeActive() {
+  const alarm = alarms.find(a => a.id === activeAlarmId);
+  if (alarm) { alarm.firing = false; alarm.snoozedUntil = new Date(Date.now() + 5 * 60 * 1000); }
+  stopAlarm();
+}
+
+function dismissActive() {
+  const alarm = alarms.find(a => a.id === activeAlarmId);
+  if (alarm) { alarm.firing = false; alarm.snoozedUntil = null; }
+  stopAlarm();
+}
+
+function stopAlarm() {
+  document.getElementById('alarm-overlay').className = '';
+  activeAlarmId = null;
+  stopSoundLoop();
+  renderAlarms();
+}
+
+// ─────────────────────────────────────────────
+//  Audio Engine (Web Audio API)
+// ─────────────────────────────────────────────
+function getCtx() {
+  if (!audioCtx || audioCtx.state === 'closed') {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+const SOUND_FNS = {
+  classic: playClassic,
+  siren:   playSiren,
+  crazy:   playCrazy,
+  nuclear: playNuclear,
+  school:  playSchoolBell,
+};
+
+// Preview durations in ms (how long before resetting the button)
+const PREVIEW_DURATION = { classic: 500, siren: 1250, crazy: 560, nuclear: 2100, school: 1700 };
+
+function startSoundLoop(tone) {
+  stopSoundLoop();
+  const fn = SOUND_FNS[tone] || playClassic;
+  fn();
+  const interval = { classic:800, siren:1300, crazy:560, nuclear:2100, school:1800 }[tone] || 800;
+  soundLoop = setInterval(fn, interval);
+}
+
+function stopSoundLoop() {
+  if (soundLoop) { clearInterval(soundLoop); soundLoop = null; }
+  if (audioCtx)  { audioCtx.close(); audioCtx = null; }
+}
+
+// ── Tone Preview ──
+function previewTone() {
+  const tone = document.getElementById('input-tone').value;
+  const btn  = document.getElementById('btn-preview');
+  // Use a separate transient context for preview so it doesn't disturb alarm audio
+  const pCtx = new (window.AudioContext || window.webkitAudioContext)();
+  // Temporarily swap global ctx for the play function, then restore
+  const saved = audioCtx;
+  audioCtx = pCtx;
+  (SOUND_FNS[tone] || playClassic)();
+  audioCtx = saved;
+  const dur = PREVIEW_DURATION[tone] || 1000;
+  setTimeout(() => pCtx.close(), dur + 100);
+
+  btn.textContent = '♪ Playing...';
+  btn.classList.add('playing');
+  btn.disabled = true;
+  setTimeout(() => {
+    btn.textContent = '▶ Preview';
+    btn.classList.remove('playing');
+    btn.disabled = false;
+  }, dur);
+}
+
+// ── Classic Beep: two sharp beeps ──
+function playClassic() {
+  const ctx = getCtx(), now = ctx.currentTime;
+  [[0, 880], [0.2, 880]].forEach(([offset, freq]) => {
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = 'square'; osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0, now + offset);
+    gain.gain.linearRampToValueAtTime(0.35, now + offset + 0.01);
+    gain.gain.setValueAtTime(0.35, now + offset + 0.14);
+    gain.gain.linearRampToValueAtTime(0, now + offset + 0.18);
+    osc.start(now + offset); osc.stop(now + offset + 0.2);
+  });
+}
+
+// ── Siren: sweep low → high → low ──
+function playSiren() {
+  const ctx = getCtx(), now = ctx.currentTime, dur = 1.1;
+  const osc = ctx.createOscillator(), gain = ctx.createGain();
+  osc.connect(gain); gain.connect(ctx.destination);
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(600, now);
+  osc.frequency.linearRampToValueAtTime(1400, now + dur * 0.5);
+  osc.frequency.linearRampToValueAtTime(600, now + dur);
+  gain.gain.setValueAtTime(0.3, now);
+  gain.gain.setValueAtTime(0.3, now + dur - 0.05);
+  gain.gain.linearRampToValueAtTime(0, now + dur);
+  osc.start(now); osc.stop(now + dur);
+}
+
+// ── Crazy: rapid random pitch blasts ──
+function playCrazy() {
+  const ctx = getCtx(), now = ctx.currentTime;
+  [1200, 800, 1600, 600, 2000, 440, 1800, 900].forEach((freq, i) => {
+    const t = now + i * 0.06;
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = i % 2 === 0 ? 'square' : 'sawtooth';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.3, t);
+    gain.gain.linearRampToValueAtTime(0, t + 0.05);
+    osc.start(t); osc.stop(t + 0.06);
+  });
+}
+
+// ── Nuclear: low rumble building to a screech ──
+function playNuclear() {
+  const ctx = getCtx(), now = ctx.currentTime;
+  const osc1 = ctx.createOscillator(), gain1 = ctx.createGain();
+  osc1.connect(gain1); gain1.connect(ctx.destination);
+  osc1.type = 'sawtooth';
+  osc1.frequency.setValueAtTime(80, now);
+  osc1.frequency.linearRampToValueAtTime(320, now + 1.8);
+  gain1.gain.setValueAtTime(0, now);
+  gain1.gain.linearRampToValueAtTime(0.5, now + 0.3);
+  gain1.gain.setValueAtTime(0.5, now + 1.5);
+  gain1.gain.linearRampToValueAtTime(0, now + 1.9);
+  osc1.start(now); osc1.stop(now + 1.9);
+
+  const osc2 = ctx.createOscillator(), gain2 = ctx.createGain();
+  osc2.connect(gain2); gain2.connect(ctx.destination);
+  osc2.type = 'square';
+  osc2.frequency.value = 1200;
+  gain2.gain.setValueAtTime(0, now + 0.8);
+  gain2.gain.linearRampToValueAtTime(0.2, now + 1.0);
+  gain2.gain.linearRampToValueAtTime(0, now + 1.9);
+  osc2.start(now + 0.8); osc2.stop(now + 1.9);
+}
+
+// ── School Bell: ding ding ding ──
+function playSchoolBell() {
+  const ctx = getCtx(), now = ctx.currentTime;
+  [0, 0.22, 0.44, 0.66, 0.88, 1.1, 1.32].forEach(offset => {
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = 'sine'; osc.frequency.value = 1047;
+    gain.gain.setValueAtTime(0, now + offset);
+    gain.gain.linearRampToValueAtTime(0.45, now + offset + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.2);
+    osc.start(now + offset); osc.stop(now + offset + 0.22);
+  });
+}
+
+// ─────────────────────────────────────────────
+//  Init
+// ─────────────────────────────────────────────
+(function setDefaultTime() {
+  const now = new Date();
+  now.setHours(now.getHours() + 1, 0, 0, 0);
+  document.getElementById('input-time').value =
+    `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+})();
+
+requestWakeLock();
+setInterval(updateClock, 1000);
+updateClock();
+</script>
+</body>
+</html>
